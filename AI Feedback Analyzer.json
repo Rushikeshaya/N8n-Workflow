@@ -1,0 +1,382 @@
+{
+  "name": "AI Feedback Analyzer",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Student Feedback",
+        "formDescription": "Share your feedback",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Course",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Faculty",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Feedback",
+              "fieldType": "textarea",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Rating",
+              "fieldType": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e6f4f65e-5f19-48c4-ba9d-337638434885",
+      "name": "Form Trigger",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        -1456,
+        112
+      ],
+      "webhookId": "8eb1b74e-48a8-4d51-8ae5-14717152dadb"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1",
+              "name": "course",
+              "value": "={{ $json.Course.trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "2",
+              "name": "faculty",
+              "value": "={{ $json.Faculty.trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "3",
+              "name": "feedback",
+              "value": "={{ $json.Feedback.trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "4",
+              "name": "rating",
+              "value": "={{ $json.Rating }}",
+              "type": "number"
+            },
+            {
+              "id": "5",
+              "name": "submittedAt",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5e7afcab-7ec5-4c9b-a46f-73696499b7a8",
+      "name": "Edit Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1248,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Course: {{ $json.course }}\nFaculty: {{ $json.faculty }}\nRating: {{ $json.rating }}\nFeedback: {{ $json.feedback }}",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "message": "You are a Student Feedback Analyzer for a college. Read ONE piece of student feedback and classify it. Never invent details not in the text.\n\nALLOWED THEMES (choose 1 to 3): Teaching Quality, Course Content, Assessment & Exams, Infrastructure & Labs, Faculty Support, Workload, Administration, Other\n\nRULES:\n1. sentiment: positive, neutral or negative.\n2. urgency = \"high\" ONLY if text mentions safety, harassment, discrimination, serious misconduct, or a facility completely unusable. \"medium\" for repeated/strong complaints, else \"low\".\n3. confidence: number 0-1. Use below 0.6 if vague, very short or mixed.\n4. summary: one neutral sentence, max 25 words, in English.\n5. Hindi/Marathi/Hinglish input is allowed; answer in English.\n6. Return ONLY valid JSON, no markdown."
+            }
+          ]
+        }
+      },
+      "id": "d71da196-e4e5-4315-b079-1c2a716aa225",
+      "name": "Feedback Analyzer (LLM Chain)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        -1024,
+        112
+      ],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-flash-lite-latest",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "b950e638-7107-4963-b693-bbffb2efb4c6",
+      "name": "Google Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        -1040,
+        320
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "3YCrwNoWKjKrU0YG",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\"type\": \"object\", \"properties\": {\"themes\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"sentiment\": {\"type\": \"string\"}, \"urgency\": {\"type\": \"string\"}, \"confidence\": {\"type\": \"number\"}, \"summary\": {\"type\": \"string\"}}}"
+      },
+      "id": "2fa76095-8778-494b-b5bb-0c0a7c4bdef6",
+      "name": "Structured Output Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        -848,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ALLOWED = [\"Teaching Quality\",\"Course Content\",\"Assessment & Exams\",\"Infrastructure & Labs\",\"Faculty Support\",\"Workload\",\"Administration\",\"Other\"];\nconst out = [];\nfor (const item of $input.all()) {\n  const ai = item.json.output || item.json;\n  let themes = (ai.themes || []).filter(t => ALLOWED.includes(t));\n  if (themes.length === 0) themes = [\"Other\"];\n  const sentiment = String(ai.sentiment || \"neutral\").toLowerCase();\n  const urgency = String(ai.urgency || \"low\").toLowerCase();\n  const confidence = Number(ai.confidence ?? 0);\n  const needs_review = sentiment === \"negative\" || urgency === \"high\" || confidence < 0.6;\n  const base = $('Edit Fields').item.json;\n  out.push({ json: { ...base, themes: themes.join(\", \"), sentiment, urgency, confidence, summary: ai.summary || \"\", needs_review } });\n}\nreturn out;"
+      },
+      "id": "9194b6da-511f-4f10-b7e9-73013f5451b6",
+      "name": "Validate & Flag",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -656,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1R7skgywtzPJcrNTTf4CYlV18VwvuQhFh8LqS9vonQeg"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Feedback"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "c8e61e7a-ee04-4c5e-bd03-394ec73f66a4",
+      "name": "Google Sheets - Append",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -448,
+        112
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "ywSxZ90tERnaiS2R",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $('Validate & Flag').item.json.needs_review }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "1298f15e-8500-42dd-a5bb-292d021867bc",
+      "name": "Needs Human Review?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -224,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "202401110056@mitaoe.ac.in",
+        "subject": "=[REVIEW NEEDED] {{ $('Validate & Flag').item.json.course }} - {{ $('Validate & Flag').item.json.sentiment }} / {{ $('Validate & Flag').item.json.urgency }}",
+        "emailType": "text",
+        "message": "=Course: {{ $('Validate & Flag').item.json.course }}\nFaculty: {{ $('Validate & Flag').item.json.faculty }}\nThemes: {{ $('Validate & Flag').item.json.themes }}\nSentiment: {{ $('Validate & Flag').item.json.sentiment }}\nUrgency: {{ $('Validate & Flag').item.json.urgency }}\nConfidence: {{ $('Validate & Flag').item.json.confidence }}\n\nAI summary: {{ $('Validate & Flag').item.json.summary }}\n\nOriginal feedback:\n{{ $('Validate & Flag').item.json.feedback }}\n\nPlease review and take appropriate action.",
+        "options": {}
+      },
+      "id": "5d16f7ac-a3f4-4f35-a4ec-38470f74f0b4",
+      "name": "Gmail - Alert Coordinator",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "5ef6e2d0-047b-4550-856a-4e384b50e895",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "QO5GRJbni2SATf9m",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "3813650e-6e08-4f55-80d8-1de8b30303f4",
+      "name": "No Alert Needed",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        0,
+        208
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Form Trigger": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Feedback Analyzer (LLM Chain)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Feedback Analyzer (LLM Chain)": {
+      "main": [
+        [
+          {
+            "node": "Validate & Flag",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Feedback Analyzer (LLM Chain)",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Feedback Analyzer (LLM Chain)",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Flag": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - Append",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets - Append": {
+      "main": [
+        [
+          {
+            "node": "Needs Human Review?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Human Review?": {
+      "main": [
+        [
+          {
+            "node": "Gmail - Alert Coordinator",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Alert Needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "versionId": "1ca793fb-4c84-4ef9-b69d-c40a10ff7859",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "883c2ff6b01af061ee6901c0deb237f083ead0ab4a634d9c93b0cf22eff9d449"
+  },
+  "nodeGroups": [],
+  "id": "gdMAaYbZ9gaSUYts",
+  "tags": []
+}
